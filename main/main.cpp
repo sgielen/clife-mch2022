@@ -9,7 +9,7 @@ static pax_buf_t buf;
 xQueueHandle buttonQueue;
 
 #include <esp_log.h>
-static const char *TAG = "mch2022-demo-app";
+static const char *TAG = "clife-mch2022";
 
 // Updates the screen with the latest buffer.
 void disp_flush() {
