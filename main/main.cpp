@@ -24,29 +24,15 @@ void exit_to_launcher() {
 
 struct MulticolorValue {
 	bool value;
-	uint8_t red;
-	uint8_t green;
-	uint8_t blue;
+	uint8_t hue;
 	uint8_t age;
 
-	MulticolorValue() : value(false), red(0), green(0), blue(0), age(0){}
+	MulticolorValue() : value(false), hue(0), age(0){}
 	MulticolorValue(std::vector<MulticolorValue> vec) : value(true), age(0) {
 		std::vector<int> hues;
 		for(auto const &cell : vec) {
 			if(cell.value) {
-				float r = float(cell.red) / UINT8_MAX;
-				float g = float(cell.green) / UINT8_MAX;
-				float b = float(cell.blue) / UINT8_MAX;
-				float min = std::min(r, std::min(g, b));
-				float max = std::max(r, std::max(g, b));
-				// hue from 0 to 360
-				int hue = max == 0 ? 0 :
-				            r == max ? (60 * (0 + (g-b)/(max-min))) :
-				            g == max ? (60 * (2 + (b-r)/(max-min))) :
-				                       (60 * (4 + (r-g)/(max-min)));
-				if(hue < 0) {
-					hue += 360;
-				}
+				int hue = int(cell.hue) * 360 / UINT8_MAX;
 				hues.push_back(hue);
 			}
 		}
@@ -64,60 +50,12 @@ struct MulticolorValue {
 			avghue = (hues[0] + hues[1] + hues[2] + 720) / 3;
 		}
 		avghue %= 360;
-		float sat = 1;
-		float value = 1;
-		int h_i = std::floor(avghue / 60);
-		float f = (avghue / 60.) - h_i;
-		float p = value * (1 - sat);
-		float q = value * (1 - f * sat);
-		float t = value * (1 - (1 - f) * sat);
-
-		value *= 255;
-		p *= 255;
-		q *= 255;
-		t *= 255;
-
-		switch(h_i) {
-		case 0:
-			red = value;
-			green = t;
-			blue = p;
-			break;
-		case 1:
-			red = q;
-			green = value;
-			blue = p;
-			break;
-		case 2:
-			red = p;
-			green = value;
-			blue = t;
-			break;
-		case 3:
-			red = p;
-			green = q;
-			blue = value;
-			break;
-		case 4:
-			red = t;
-			green = p;
-			blue = value;
-			break;
-		case 5:
-			red = value;
-			green = p;
-			blue = q;
-			break;
-		default:
-			abort();
-		};
+		hue = avghue * UINT8_MAX / 360;
 	}
-	MulticolorValue(bool value) : value(value), red(0), green(0), blue(0), age(0) {
+	MulticolorValue(bool value) : value(value), hue(0), age(0) {
 		if(value) {
-			char color = (rand() % 6) + 1;
-			red   = (color & 1) ? 255 : 0;
-			green = (color & 2) ? 255 : 0;
-			blue  = (color & 4) ? 255 : 0;
+			char color = rand() & 6;
+			hue = (UINT8_MAX / 6) * color;
 		}
 	}
 
@@ -128,9 +66,9 @@ struct MulticolorValue {
 	operator bool() const { return value; }
 	std::string hash() const {
 		if(value) {
-			return std::string("1") + char(red) + char(green) + char(blue);
+			return std::string("1") + char(hue);
 		} else {
-			return "0\x00\x00\x00";
+			return "0\x00";
 		}
 	}
 
@@ -138,59 +76,12 @@ struct MulticolorValue {
 		return (value ? 'o' : ' ');
 	}
 
-	void begin_screen(std::ostream &os) const {
-/*
-		if(!concise) {
-			std::cout << "+";
-			for(int i = 0; i < get_width(); ++i) {
-				std::cout << "-";
-			}
-			std::cout << "+\n";
-		}
-*/
-	}
-	void end_screen(std::ostream &os) const {
-/*
-		if(!to_ledscreen && !concise) {
-			begin_screen(os);
-			std::cout << "\x1b[1;1H" << std::flush;
-		}
-*/
-	}
-	void begin_line(std::ostream &os) const {
-/*
-		if(!to_ledscreen && !concise) {
-			std::cout << "|";
-		}
-*/
-	}
-	void end_line(std::ostream &os) const {
-/*
-		if(!to_ledscreen && !concise) {
-			std::cout << "|\n";
-		}
-*/
-	}
+	void begin_screen(std::ostream &os) const {}
+	void end_screen(std::ostream &os) const {}
+	void begin_line(std::ostream &os) const {}
+	void end_line(std::ostream &os) const {}
 
-	void print(std::ostream &os) const {
-/*
-		if(value && to_ledscreen) {
-			os << red << green << blue;
-		} else if(value) {
-			double brightness = std::max(0.3, 1 - age / 20.);
-
-			uint8_t redval = (red * brightness) / 43;
-			uint8_t greenval = (green * brightness) / 43;
-			uint8_t blueval = (blue * brightness) / 43;
-			uint8_t code = 16 + 36 * redval + 6 * greenval + blueval;
-			os << "\x1b[38;5;" << int(code) << "mo\x1b[m";
-		} else if(to_ledscreen) {
-			os << '\x00' << '\x00' << '\x00';
-		} else {
-			os << ' ';
-		}
-*/
-	}
+	void print(std::ostream &os) const {}
 };
 
 /*
@@ -259,12 +150,19 @@ void app_main() {
 			//check_stop_condition(field, earlier_hashes, field_done, repeats_to_do);
 		}
 
+		pax_col_t black = pax_col_rgb(0, 0, 0);
+
 		for (int y = 0; y < field.get_height(); ++y) {
 			taskYIELD();
 			auto const &row = field[y];
 			for (int x = 0; x < field.get_width(); ++x) {
 				auto const &cell = row[x];
-				pax_col_t col = pax_col_rgb(cell.red, cell.green, cell.blue);
+				uint8_t brightness = 255 - (2 * cell.age);
+				pax_col_t col = black;
+
+				if (cell.value) {
+					col = pax_col_hsv(cell.hue, 255, brightness);
+				}
 
 				pax_draw_rect(&buf, col, x * resolutionFactor, y * resolutionFactor, resolutionFactor, resolutionFactor);
 			}
