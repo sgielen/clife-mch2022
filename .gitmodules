@@ -45,4 +45,4 @@
 	url = https://github.com/badgeteam/mch2022-tools
 [submodule "main/clife"]
 	path = main/clife
-	url = git@github.com:sgielen/clife.git
+	url = https://github.com/sgielen/clife.git

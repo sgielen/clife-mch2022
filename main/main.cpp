@@ -210,8 +210,6 @@ void check_stop_condition(FieldType field, std::vector<std::string> &earlier_has
 
 extern "C"
 void app_main() {
-	int microsleeptime = 100000;
-
 	ESP_LOGI(TAG, "Starting clife");
 
 	// Initialize the screen, the I2C and the SPI busses.
@@ -232,23 +230,23 @@ void app_main() {
 	auto const resolutionFactor = 4;
 	GameOfLifeField<MulticolorValue> field(320 / resolutionFactor /*col*/, 240 / resolutionFactor /*row*/);
 
-	// TODO
-	auto get_width = [&field]() {
-		return field.get_width();
-	};
-
 	// Initialize NVS.
 	nvs_flash_init();
 
-	// Initialize WiFi. This doesn't connect to Wifi yet.
-	wifi_init();
-
+	taskYIELD();
 	field.generateRandom(35);
 
 	bool field_done = false;
 	int repeats_to_do = 0;
 
-	auto i = 0;
+	// make sure the queue is empty
+	while (1) {
+		rp2040_input_message_t message;
+		xQueueReceive(buttonQueue, &message, 0);
+		if (!message.input || !message.state) {
+			break;
+		}
+	}
 
 	while(!field_done || repeats_to_do > 0) {
 		taskYIELD();
@@ -257,12 +255,10 @@ void app_main() {
 			--repeats_to_do;
 		}
 		field.nextState();
-		field.print_simple(std::cout);
 		if(!field_done) {
 			//check_stop_condition(field, earlier_hashes, field_done, repeats_to_do);
 		}
 
-		// Pick a random background color.
 		for (int y = 0; y < field.get_height(); ++y) {
 			taskYIELD();
 			auto const &row = field[y];
@@ -274,23 +270,19 @@ void app_main() {
 			}
 		}
 
-		// Draws the entire graphics buffer to the screen.
 		disp_flush();
+		taskYIELD();
 
-		// Wait for button presses and do another cycle.
-
-		// Structure used to receive data.
 		rp2040_input_message_t message;
-
-		// Wait forever for a button press (because of portMAX_DELAY)
-		//xQueueReceive(buttonQueue, &message, 100 / portTICK_PERIOD_MS);
 		xQueueReceive(buttonQueue, &message, 0);
 
-		// Which button is currently pressed?
+		if (message.input == RP2040_INPUT_BUTTON_START && message.state) {
+			// Regenerate
+			field.generateRandom(35);
+		}
 		if (message.input == RP2040_INPUT_BUTTON_HOME && message.state) {
-			// If home is pressed, exit to launcher.
+			// Exit to launcher.
 			exit_to_launcher();
 		}
-
 	}
 }
