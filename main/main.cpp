@@ -1,7 +1,8 @@
 #include "main.h"
-#include <string>
 #include <algorithm>
 #include <ctime>
+#include <numbers>
+#include <string>
 #include "clife/clife.hpp"
 #include "clife/util.hpp"
 
@@ -29,28 +30,26 @@ struct MulticolorValue {
 
 	MulticolorValue() : value(false), hue(0), age(0){}
 	MulticolorValue(std::vector<MulticolorValue> vec) : value(true), age(0) {
-		std::vector<int> hues;
-		for(auto const &cell : vec) {
-			if(cell.value) {
-				int hue = int(cell.hue) * 360 / UINT8_MAX;
-				hues.push_back(hue);
-			}
-		}
-		assert(hues.size() == 3);
-		std::sort(hues.begin(), hues.end());
-		int range1 = hues[2] - hues[0];
-		int range2 = (hues[0] + 360) - hues[1];
-		int range3 = (hues[1] + 360) - hues[2];
-		int avghue;
-		if(std::min(range1, std::min(range2, range3)) == range1) {
-			avghue = (hues[0] + hues[1] + hues[2]) / 3;
-		} else if(std::min(range1, std::min(range2, range3)) == range2) {
-			avghue = (hues[0] + hues[1] + hues[2] + 360) / 3;
-		} else {
-			avghue = (hues[0] + hues[1] + hues[2] + 720) / 3;
-		}
-		avghue %= 360;
-		hue = avghue * UINT8_MAX / 360;
+		assert(vec.size() == 3);
+		float pi = 4 * std::atan(1);
+		float hue0 = 2 * pi * float(vec[0].hue) / UINT8_MAX;
+		float hue1 = 2 * pi * float(vec[1].hue) / UINT8_MAX;
+		float hue2 = 2 * pi * float(vec[2].hue) / UINT8_MAX;
+
+		float x0 = std::cos(hue0);
+		float y0 = std::sin(hue0);
+		float x1 = std::cos(hue1);
+		float y1 = std::sin(hue1);
+		float x2 = std::cos(hue2);
+		float y2 = std::sin(hue2);
+		
+		float xavg = (x0 + x1 + x2) / 3.0;
+		float yavg = (y0 + y1 + y2) / 3.0;
+		float angle = std::atan2(yavg, xavg);
+		hue = int(angle / (2 * pi) * UINT8_MAX);
+		hue %= UINT8_MAX;
+		hue += UINT8_MAX;
+		hue %= UINT8_MAX;
 	}
 	MulticolorValue(bool value) : value(value), hue(0), age(0) {
 		if(value) {
