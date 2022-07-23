@@ -131,7 +131,7 @@ void app_main() {
 	int repeats_to_do = 0;
 
 	// make sure the queue is empty
-	while (1) {
+	for (int i = 0; i < 20; ++i) {
 		rp2040_input_message_t message;
 		xQueueReceive(buttonQueue, &message, 0);
 		if (!message.input || !message.state) {
