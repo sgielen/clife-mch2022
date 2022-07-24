@@ -99,6 +99,33 @@ void check_stop_condition(FieldType field, std::vector<std::string> &earlier_has
 }
 */
 
+#define WINDOW_WIDTH 320
+#define WINDOW_HEIGHT 240
+#define PIXEL_SIZE 8
+
+uint32_t pax_col2buf(pax_buf_t *buf, pax_col_t color) {
+        assert(buf->type == PAX_BUF_16_565RGB);
+        uint16_t value = ((color >> 8) & 0xf800) | ((color >> 5) & 0x07e0) | ((color >> 3) & 0x001f);
+        return (value >> 8) | ((value << 8) & 0xff00);
+
+}
+
+void pax_set_pixel_u(pax_buf_t *buf, uint32_t color, int x, int y) {
+        assert(buf->bpp == 16);
+        assert(x < buf->width);
+        assert(y < buf->height);
+        buf->buf_16bpp[x + y * buf->width] = color;
+}
+
+void render_pixel(pax_buf_t *buf, pax_col_t color, int x, int y) {
+        uint32_t col = pax_col2buf(buf, color);
+        for (int py = PIXEL_SIZE * y; py < PIXEL_SIZE * (y + 1); py++) {
+                for (int px = PIXEL_SIZE * x; px < PIXEL_SIZE * (x + 1); px++) {
+                        pax_set_pixel_u(buf, col, px, py);
+                }
+        }
+}
+
 extern "C"
 void app_main() {
 	ESP_LOGI(TAG, "Starting clife");
@@ -113,19 +140,18 @@ void app_main() {
 	buttonQueue = get_rp2040()->queue;
 
 	// Initialize graphics for the screen.
-	pax_buf_init(&buf, NULL, 320, 240, PAX_BUF_16_565RGB);
+	pax_buf_init(&buf, NULL, WINDOW_WIDTH, WINDOW_HEIGHT, PAX_BUF_16_565RGB);
 
 	init_random();
 
 	std::vector<std::string> earlier_hashes;
-	auto const resolutionFactor = 4;
-	GameOfLifeField<MulticolorValue> field(320 / resolutionFactor /*col*/, 240 / resolutionFactor /*row*/);
+	GameOfLifeField<MulticolorValue> field(WINDOW_WIDTH / PIXEL_SIZE /*col*/, WINDOW_HEIGHT / PIXEL_SIZE /*row*/);
 
 	// Initialize NVS.
 	nvs_flash_init();
 
 	taskYIELD();
-	field.generateRandom(35);
+	field.generateRandom(25);
 
 	bool field_done = false;
 	int repeats_to_do = 0;
@@ -150,21 +176,18 @@ void app_main() {
 			//check_stop_condition(field, earlier_hashes, field_done, repeats_to_do);
 		}
 
-		pax_col_t black = pax_col_rgb(0, 0, 0);
+		pax_col_t black = pax_col_argb(0x80, 0, 0, 0);
+                //pax_simple_rect(&buf, black, 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT);
+                pax_background(&buf, black);
 
 		for (int y = 0; y < field.get_height(); ++y) {
-			taskYIELD();
 			auto const &row = field[y];
 			for (int x = 0; x < field.get_width(); ++x) {
 				auto const &cell = row[x];
-				uint8_t brightness = 255 - (2 * cell.age);
-				pax_col_t col = black;
-
 				if (cell.value) {
-					col = pax_col_hsv(cell.hue, 255, brightness);
+					auto col = pax_col_hsv(cell.hue, 255, 255);
+                                        render_pixel(&buf, col, x, y);
 				}
-
-				pax_draw_rect(&buf, col, x * resolutionFactor, y * resolutionFactor, resolutionFactor, resolutionFactor);
 			}
 		}
 
@@ -176,7 +199,7 @@ void app_main() {
 
 		if (message.input == RP2040_INPUT_BUTTON_START && message.state) {
 			// Regenerate
-			field.generateRandom(35);
+			field.generateRandom(25);
 		}
 		if (message.input == RP2040_INPUT_BUTTON_HOME && message.state) {
 			// Exit to launcher.
