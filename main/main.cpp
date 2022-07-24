@@ -49,6 +49,7 @@ struct MulticolorValue {
 		} else {
 			avghue = (hues[0] + hues[1] + hues[2] + 720) / 3;
 		}
+		avghue += 5;
 		avghue %= 360;
 		hue = avghue * UINT8_MAX / 360;
 	}
