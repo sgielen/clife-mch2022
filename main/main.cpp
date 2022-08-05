@@ -4,6 +4,7 @@
 #include <ctime>
 #include "clife/clife.hpp"
 #include "clife/util.hpp"
+#include <mbedtls/md.h>
 
 static pax_buf_t buf;
 xQueueHandle buttonQueue;
@@ -85,24 +86,22 @@ struct MulticolorValue {
 	void print(std::ostream &os) const {}
 };
 
-/*
 template <typename FieldType>
-void check_stop_condition(FieldType field, std::vector<std::string> &earlier_hashes, bool &done, int &repeats_to_do) {
-	std::string hash = field.field_hash();
-	for(size_t i = 0; i < earlier_hashes.size(); ++i) {
-		if(earlier_hashes[i] == hash) {
-			done = true;
-			repeats_to_do = 50;
-			break;
-		}
+bool check_stop_condition(FieldType field, BloomFilter &bloom_filter, int &stop_counter) {
+	uint64_t hash = field_hash(field);
+	if (bloom_filter.test(hash)) {
+		if (++stop_counter >= 50)
+			return true;
+		return false;
+	} else {
+		stop_counter = 0;
+		return false;
 	}
-	earlier_hashes.push_back(hash);
 }
-*/
 
 #define WINDOW_WIDTH 320
 #define WINDOW_HEIGHT 240
-#define PIXEL_SIZE 8
+#define PIXEL_SIZE 4
 
 uint32_t pax_col2buf(pax_buf_t *buf, pax_col_t color) {
         assert(buf->type == PAX_BUF_16_565RGB);
@@ -127,6 +126,28 @@ void render_pixel(pax_buf_t *buf, pax_col_t color, int x, int y) {
         }
 }
 
+uint64_t field_hash(GameOfLifeField<MulticolorValue> field) {
+	union {
+		uint8_t hmacResult[32];
+		uint64_t result;
+	};
+
+	mbedtls_md_context_t ctx;
+	mbedtls_md_init(&ctx);
+	const mbedtls_md_info_t *info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+	mbedtls_md_setup(&ctx, info, 1);
+	mbedtls_md_hmac_starts(&ctx, (const unsigned char*)"", 0);
+
+	for (auto const &cell : field.field) {
+		bool value = bool(cell);
+		mbedtls_md_hmac_update(&ctx, (const unsigned char *) &value, sizeof(value));
+	}
+
+	mbedtls_md_hmac_finish(&ctx, hmacResult);
+	mbedtls_md_free(&ctx);
+	return result;
+}
+
 extern "C"
 void app_main() {
 	ESP_LOGI(TAG, "Starting clife");
@@ -145,66 +166,58 @@ void app_main() {
 
 	init_random();
 
-	std::vector<std::string> earlier_hashes;
-	GameOfLifeField<MulticolorValue> field(WINDOW_WIDTH / PIXEL_SIZE /*col*/, WINDOW_HEIGHT / PIXEL_SIZE /*row*/);
-
 	// Initialize NVS.
 	nvs_flash_init();
 
-	taskYIELD();
-	field.generateRandom(25);
-
-	bool field_done = false;
-	int repeats_to_do = 0;
-
-	// make sure the queue is empty
-	for (int i = 0; i < 20; ++i) {
-		rp2040_input_message_t message;
-		xQueueReceive(buttonQueue, &message, 0);
-		if (!message.input || !message.state) {
-			break;
-		}
-	}
-
-	while(!field_done || repeats_to_do > 0) {
+	while (true) {
 		taskYIELD();
+		int stop_counter = 0;
+		BloomFilter bloom_filter;
+		GameOfLifeField<MulticolorValue> field(WINDOW_WIDTH / PIXEL_SIZE /*col*/, WINDOW_HEIGHT / PIXEL_SIZE /*row*/);
+		field.generateRandom(25);
 
-		if(repeats_to_do > 0) {
-			--repeats_to_do;
-		}
-		field.nextState();
-		if(!field_done) {
-			//check_stop_condition(field, earlier_hashes, field_done, repeats_to_do);
-		}
-
-		pax_col_t black = pax_col_argb(0x80, 0, 0, 0);
-                //pax_simple_rect(&buf, black, 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT);
-                pax_background(&buf, black);
-
-		for (int y = 0; y < field.get_height(); ++y) {
-			auto const &row = field[y];
-			for (int x = 0; x < field.get_width(); ++x) {
-				auto const &cell = row[x];
-				if (cell.value) {
-					auto col = pax_col_hsv(cell.hue, 255, 255);
-                                        render_pixel(&buf, col, x, y);
-				}
+		// make sure the queue is empty
+		for (int i = 0; i < 20; ++i) {
+			rp2040_input_message_t message;
+			xQueueReceive(buttonQueue, &message, 0);
+			if (!message.input || !message.state) {
+				break;
 			}
 		}
 
-		disp_flush();
-		taskYIELD();
+		while(!check_stop_condition(field, bloom_filter, stop_counter)) {
+			taskYIELD();
 
-		rp2040_input_message_t message;
-		xQueueReceive(buttonQueue, &message, 0);
+			field.nextState();
 
-		if (message.input == RP2040_INPUT_BUTTON_START && message.state) {
-			// Regenerate
-			field.generateRandom(25);
-		}
-		if (message.input == RP2040_INPUT_BUTTON_HOME && message.state) {
-			// Exit to launcher.
-			exit_to_launcher();
+			pax_col_t black = pax_col_argb(0x80, 0, 0, 0);
+			//pax_simple_rect(&buf, black, 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT);
+			pax_background(&buf, black);
+
+			for (int y = 0; y < field.get_height(); ++y) {
+				auto const &row = field[y];
+				for (int x = 0; x < field.get_width(); ++x) {
+					auto const &cell = row[x];
+					if (cell.value) {
+						auto col = pax_col_hsv(cell.hue, 255, 255);
+						render_pixel(&buf, col, x, y);
+					}
+				}
+			}
+
+			disp_flush();
+			taskYIELD();
+
+			rp2040_input_message_t message;
+			xQueueReceive(buttonQueue, &message, 0);
+
+			if (message.input == RP2040_INPUT_BUTTON_START && message.state) {
+				// Regenerate
+				break;
+			} else if (message.input == RP2040_INPUT_BUTTON_HOME && message.state) {
+				// Exit to launcher.
+				exit_to_launcher();
+			}
 		}
 	}
 }
